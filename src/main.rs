@@ -33,27 +33,28 @@ fn main() -> Result<()> {
 
     let _server = server::init_server()?;    
 
+    _wifi_svc.wifi_mode_tx.send(wifi::WifiMode::AP)?;
 
     let cur_time = time::Instant::now();
     let mut changed_mode = false;
     let mut changed_mode_2 = false;
     loop {
         if !changed_mode && cur_time.elapsed() > Duration::from_secs(10) {
+            println!("Changing to bad client");
+            _wifi_svc.wifi_mode_tx.send(wifi::WifiMode::Client(ClientConfiguration {
+                ssid: "RociLANte2".into(),
+                password: "RememberTheCant".into(),
+                ..Default::default()
+            }))?;
+            changed_mode = true;
+        }
+        if !changed_mode_2 && cur_time.elapsed() > Duration::from_secs(30) {
             println!("Changing to client");
-            _wifi_svc.set_wifi_mode(wifi::WifiMode::Client(ClientConfiguration {
+            _wifi_svc.wifi_mode_tx.send(wifi::WifiMode::Client(ClientConfiguration {
                 ssid: "RociLANte".into(),
                 password: "RememberTheCant".into(),
                 ..Default::default()
-            }));
-            changed_mode = true;
-        }
-        if !changed_mode_2 && cur_time.elapsed() > Duration::from_secs(20) {
-            println!("Changing to bad client");
-            _wifi_svc.set_wifi_mode(wifi::WifiMode::Client(ClientConfiguration {
-                ssid: "RociLANte".into(),
-                password: "RememberTheCant2".into(),
-                ..Default::default()
-            }));
+            }))?;
             changed_mode_2 = true;
         }
         thread::sleep(Duration::from_millis(1000));

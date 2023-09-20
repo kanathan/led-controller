@@ -17,15 +17,18 @@ use embedded_svc::{
 use std:: {
     thread,
     time::Duration,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
 };
 
 
-const MAX_RETRIES: u8 = 10;
 const AP_SSID: &str = "ESP32";
 const AP_PW: &str = "";
+const AP_SUBNET: ipv4::Subnet = ipv4::Subnet {
+    gateway: ipv4::Ipv4Addr::new(192, 168, 1, 1),
+    mask: ipv4::Mask(24) // equivalent to 255.255.255.0
+};
 
-const WIFI_MODE_MUT_ERR: &str = "Failure to unlock WifiMode mutex";
+const MODE_MUTEX_ERR: &str = "Failed to unlock wifi mode mutex";
 
 
 #[derive(Clone, Debug)]
@@ -34,15 +37,10 @@ pub enum WifiMode {
     Client(ClientConfiguration),
 }
 
-enum ClientWatchdogResult {
-    Continue,
-    SwitchMode(WifiMode),
-}
-
-
 pub struct WifiService {
     _handle: thread::JoinHandle<()>,
-    wifi_mode: Arc<Mutex<WifiMode>>,
+    pub wifi_mode_tx: mpsc::Sender<WifiMode>,
+    cur_mode: Arc<Mutex<WifiMode>>,
 }
 
 
@@ -55,10 +53,7 @@ impl WifiService {
     {
         // AP IP config
         let ipv4_cfg = ipv4::RouterConfiguration {
-            subnet: ipv4::Subnet {
-                gateway: ipv4::Ipv4Addr::new(192, 168, 1, 1),
-                mask: ipv4::Mask(24) // equivalent to 255.255.255.0
-            },
+            subnet: AP_SUBNET,
             ..Default::default()
         };
 
@@ -74,28 +69,25 @@ impl WifiService {
             EspNetif::new_with_conf(&net_conf)?,
         )?;
 
-        let wifi_mode = Arc::new(Mutex::new(WifiMode::AP));
-        let wifi_mode_c = wifi_mode.clone();
+        let cur_mode = Arc::new(Mutex::new(WifiMode::AP));
+        let cur_mode_c = cur_mode.clone();
+        let (wifi_mode_tx, wifi_mode_rx) = mpsc::channel::<WifiMode>();
 
         let join_handle = thread::spawn(move || {
-            if let Err(e) = wifi_service_start(esp_wifi, sysloop, wifi_mode_c) {
+            if let Err(e) = wifi_service_start(esp_wifi, sysloop, cur_mode_c, wifi_mode_rx) {
                 log::error!("Error running wifi service: {e:?}");
             }
         });
 
         Ok(Self {
             _handle: join_handle,
-            wifi_mode,
+            wifi_mode_tx,
+            cur_mode,
         })
     }
 
-    pub fn set_wifi_mode(&self, mode: WifiMode) {
-        log::info!("Setting wifi mode to {mode:?}");
-        *self.wifi_mode.lock().expect(WIFI_MODE_MUT_ERR) = mode;
-    }
-
-    pub fn get_wifi_mode(&self) -> WifiMode {
-        self.wifi_mode.lock().expect(WIFI_MODE_MUT_ERR).to_owned()
+    pub fn current_mode(&self) -> &Arc<Mutex<WifiMode>> {
+        &self.cur_mode
     }
 }
 
@@ -106,7 +98,8 @@ impl WifiService {
 fn wifi_service_start(
     mut esp_wifi: EspWifi,
     sysloop: EspSystemEventLoop,
-    wifi_mode: Arc<Mutex<WifiMode>>,
+    cur_mode: Arc<Mutex<WifiMode>>,
+    wifi_mode_rx: mpsc::Receiver<WifiMode>,
 ) -> Result<()>
 {
     // FOR DEBUGGING
@@ -117,137 +110,101 @@ fn wifi_service_start(
 
     let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sysloop.clone())?;
 
-    *wifi_mode.lock().expect(WIFI_MODE_MUT_ERR) = 
+    let mut commanded_mode_change = 
         match wifi.get_configuration()? {
             Configuration::Client(config) => {
                 if config.ssid.is_empty() {
                     // No saved ssid
-                    WifiMode::AP
+                    Some(WifiMode::AP)
                 } else {
                     // Saved ssid, so let's try using that
                     log::info!("Will try to connect to previous SSID: {}", config.ssid);
-                    WifiMode::Client(config)
+                    Some(WifiMode::Client(config))
                 }
             },
             // Either no config or in AP mode already
-            _ => WifiMode::AP
+            _ => Some(WifiMode::AP)
         };
 
+    let mut cur_retries: u8 = 0;
+    let mut max_retries: u8 = 0;
     log::info!("Starting wifi watchdog");
     loop {
-        let cur_wifi_mode = wifi_mode.lock().expect(WIFI_MODE_MUT_ERR).to_owned();
-        match cur_wifi_mode {
-            WifiMode::Client(config) => {
-                log::info!("Client watchdog");
-                wifi.stop()?;
-                wifi.set_configuration(&Configuration::Client(config.clone()))?;
+        if let Ok(mode) = wifi_mode_rx.recv_timeout(Duration::from_millis(1000)) {
+            // Allow external commands to overwrite a pending mode change
+            commanded_mode_change = Some(mode);
+        }
 
-                loop {
-                    if !wifi.is_up()? {
-                        log::info!("Wifi client disconnected. Attempting to connect");
-                        let status = perform_client_connection(&mut wifi)?;
-                        if let ClientWatchdogResult::SwitchMode(mode) = status {
-                            *wifi_mode.lock().expect(WIFI_MODE_MUT_ERR) = mode;
-                            break
-                        }
-                    }
-                    if !matches!(&mut *wifi_mode.lock().expect(WIFI_MODE_MUT_ERR), WifiMode::Client(_)) {
-                        log::info!("No longer in Client mode");
-                        break
-                    }
-                    thread::sleep(Duration::from_millis(1000));
-                }
-            },
-            WifiMode::AP => {
-                log::info!("AP watchdog");
-                activate_ap(&mut wifi)?;
-                loop {
-                    if !wifi.is_up()? || !matches!(&mut *wifi_mode.lock().expect(WIFI_MODE_MUT_ERR), WifiMode::AP) {
-                        log::info!("No longer in AP mode or had a disconnection");
-                        break
-                    }
-                    thread::sleep(Duration::from_millis(1000));
+        if let Some(mode) = commanded_mode_change.take() {
+            cur_retries = 0;
+
+            log::info!("Switching wifi modes: {mode:?}");
+            *cur_mode.lock().expect(MODE_MUTEX_ERR) = mode.clone();
+            wifi.stop()?;
+            match mode {
+                WifiMode::Client(config) => {
+                    max_retries = 0; // Don't try connecting more than once
+                    wifi.set_configuration(&Configuration::Client(config))?;
+                },
+                WifiMode::AP => {
+                    max_retries = u8::MAX; // Connect forever
+                    let config = Configuration::AccessPoint(AccessPointConfiguration {
+                        ssid: AP_SSID.into(),
+                        password: AP_PW.into(),
+                        ..Default::default()
+                    });
+
+                    wifi.set_configuration(&config)?;
                 }
             }
         }
-        
-    }
-    log::warn!("Exiting wifi watchdog");
-}
 
+        if !wifi.is_up()? {
+            if cur_retries > max_retries {
+                log::info!("Unable to connect. Switching to AP mode");
+                commanded_mode_change = Some(WifiMode::AP);
+            } else {
+                log::info!("Wifi client disconnected. Attempting to connect");
+                perform_wifi_connection(&mut wifi)?;
+                cur_retries = cur_retries.saturating_add(1);
+            }
+        } else {
+            cur_retries = 0;
+        }
+    }
+}
 
 fn on_wifi_event(event: &WifiEvent) {
-    log::info!("EVENT: {event:?}");
+    log::info!("WIFI EVENT: {event:?}");
 }
 
 
-fn perform_client_connection(wifi: &mut BlockingWifi<&mut EspWifi>) -> Result<ClientWatchdogResult> {    
-    let mut retries = 0;
+fn perform_wifi_connection(wifi: &mut BlockingWifi<&mut EspWifi>) -> Result<()> {    
 
-    while retries < MAX_RETRIES {
-        retries += 1;
-        if !wifi.is_started()? {
-            match wifi.start() {
-                Ok(_) => (),
-                Err(e) => {
-                    log::warn!("Issue starting wifi: {e:?}");
-                    continue
-                }
-            }
-        }
-        if !wifi.is_connected()? {
-            match wifi.connect() {
-                Ok(_) => (),
-                Err(e) => {
-                    log::warn!("Issue connecting wifi: {e:?}");
-                    continue
-                }
-            }
-        }
-        match wifi.wait_netif_up() {
+    if !wifi.is_started()? {
+        match wifi.start() {
             Ok(_) => (),
             Err(e) => {
-                log::warn!("Issue with network interface: {e:?}");
-                continue
+                log::warn!("Issue starting wifi: {e}");
+                return Ok(())
             }
         }
-        if wifi.is_up()? {
-            return Ok(ClientWatchdogResult::Continue)
+    }
+    if !wifi.is_connected()? {
+        match wifi.connect() {
+            Ok(_) => (),
+            Err(e) => {
+                log::warn!("Issue connecting wifi: {e}");
+                return Ok(())
+            }
         }
     }
-
-    // Ran out of retries
-    log::warn!("Error connecting to wifi client. Returning to AP mode");
-    Ok(ClientWatchdogResult::SwitchMode(WifiMode::AP))
-}
-
-
-fn activate_ap(wifi: &mut BlockingWifi<&mut EspWifi>) -> Result<()> {
-    log::debug!("Activating AP");
-
-    let config = Configuration::AccessPoint(AccessPointConfiguration {
-        ssid: AP_SSID.into(),
-        password: AP_PW.into(),
-        ..Default::default()
-    });
-
-    if wifi.is_started()? {
-        log::info!("Stopping wifi service to reset config");
-        wifi.stop()?;
+    match wifi.wait_netif_up() {
+        Ok(_) => (),
+        Err(e) => {
+            log::warn!("Issue with network interface: {e}");
+            return Ok(())
+        }
     }
-
-    wifi.set_configuration(&config)?;
-
-    log::info!("Starting wifi AP service");
-    wifi.start()?;
-
-    log::info!("Wifi AP service started. Waiting until fully up");
-    wifi.wait_netif_up()?;
-
-    let ip_info = wifi.wifi_mut().ap_netif_mut().get_ip_info()?;
-    log::info!("Wifi AP service fully up. Connect at {} on {}", ip_info.ip, AP_SSID);
-    
-    println!("{:?}", wifi.wifi_mut().ap_netif_mut().get_ip_info()?);
-    
     Ok(())
 }
