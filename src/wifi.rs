@@ -11,6 +11,7 @@ use embedded_svc::{
         Configuration,
         ClientConfiguration,
         AccessPointConfiguration,
+        AuthMethod,
     },
     ipv4,
 };
@@ -22,7 +23,8 @@ use std:: {
 
 
 const AP_SSID: &str = "ESP32";
-const AP_PW: &str = "";
+const AP_PW: &str = "myesp123";
+const AP_AUTH: AuthMethod = AuthMethod::WPA2Personal;
 const AP_SUBNET: ipv4::Subnet = ipv4::Subnet {
     gateway: ipv4::Ipv4Addr::new(192, 168, 1, 1),
     mask: ipv4::Mask(24) // equivalent to 255.255.255.0
@@ -73,11 +75,14 @@ impl WifiService {
         let cur_mode_c = cur_mode.clone();
         let (wifi_mode_tx, wifi_mode_rx) = mpsc::channel::<WifiMode>();
 
-        let join_handle = thread::spawn(move || {
-            if let Err(e) = wifi_service_start(esp_wifi, sysloop, cur_mode_c, wifi_mode_rx) {
-                log::error!("Error running wifi service: {e:?}");
-            }
-        });
+
+        let join_handle = thread::Builder::new()
+            .stack_size(4096)
+            .spawn(move || {
+                if let Err(e) = wifi_service_start(esp_wifi, sysloop, cur_mode_c, wifi_mode_rx) {
+                    log::error!("Error running wifi service: {e:?}");
+                }
+            })?;
 
         Ok(Self {
             _handle: join_handle,
@@ -88,6 +93,15 @@ impl WifiService {
 
     pub fn current_mode(&self) -> &Arc<Mutex<WifiMode>> {
         &self.cur_mode
+    }
+
+    pub fn connect_to_client(&self, ssid: &str, password: &str) -> Result<()> {
+        self.wifi_mode_tx.send(WifiMode::Client(ClientConfiguration {
+            ssid: ssid.into(),
+            password: password.into(),
+            ..Default::default()
+        }))?;
+        Ok(())
     }
 }
 
@@ -151,6 +165,7 @@ fn wifi_service_start(
                     let config = Configuration::AccessPoint(AccessPointConfiguration {
                         ssid: AP_SSID.into(),
                         password: AP_PW.into(),
+                        auth_method: AP_AUTH,
                         ..Default::default()
                     });
 

@@ -4,11 +4,9 @@ use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     nvs::EspDefaultNvsPartition,
 };
-use embedded_svc::wifi::ClientConfiguration;
 use std:: {
     thread,
     time::Duration,
-    time,
 };
 
 // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
@@ -28,35 +26,11 @@ fn main() -> Result<()> {
     let sysloop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
-    // Connect to the Wi-Fi network
-    let _wifi_svc = wifi::WifiService::run_wifi_service(peripherals.modem, sysloop, nvs)?;    
+    let wifi_svc = wifi::WifiService::run_wifi_service(peripherals.modem, sysloop, nvs)?;
 
-    let _server = server::init_server()?;    
+    let _server = server::ServerService::init_server(wifi_svc)?;
 
-    _wifi_svc.wifi_mode_tx.send(wifi::WifiMode::AP)?;
-
-    let cur_time = time::Instant::now();
-    let mut changed_mode = false;
-    let mut changed_mode_2 = false;
     loop {
-        if !changed_mode && cur_time.elapsed() > Duration::from_secs(10) {
-            println!("Changing to bad client");
-            _wifi_svc.wifi_mode_tx.send(wifi::WifiMode::Client(ClientConfiguration {
-                ssid: "RociLANte2".into(),
-                password: "RememberTheCant".into(),
-                ..Default::default()
-            }))?;
-            changed_mode = true;
-        }
-        if !changed_mode_2 && cur_time.elapsed() > Duration::from_secs(30) {
-            println!("Changing to client");
-            _wifi_svc.wifi_mode_tx.send(wifi::WifiMode::Client(ClientConfiguration {
-                ssid: "RociLANte".into(),
-                password: "RememberTheCant".into(),
-                ..Default::default()
-            }))?;
-            changed_mode_2 = true;
-        }
         thread::sleep(Duration::from_millis(1000));
     }
 }

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
         <title>LED Controller</title>
         <style>
             html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}
@@ -20,6 +20,43 @@
     <body>
         <h1>ESP32 Web Server</h1>
         <h3>Using Access Point(AP) Mode</h3>
-        <p>LED Status: OFF</p><a class=\"button button-off\" href=\"/led1off\">OFF</a>
+        <form id="wifiform" action="/wifi-data" method="POST">
+            <label for="ssid">SSID:</label><br>
+            <input type="text" id="ssid" name="ssid"><br><br>
+            <label for="password">Password:</label><br>
+            <input type="password" id="password" name="password"><br><br>
+            <button id="main-submit" type="submit">Connect</button>
+        </form>
+        <p id="status"></p>
+        <script>
+            function formSubmit(event) {
+                var url = "/wifi-data";
+                var formData = new FormData(event.target);
+                var formBody = [];
+                
+                for (const pair of formData.entries()) {
+                  formBody.push(pair[0] + "=" + pair[1]);
+                }
+                formBody = formBody.join("&");               
+                
+                var request = new XMLHttpRequest();
+                request.open('POST', url, true);
+                request.setRequestHeader("Content-type","application/x-www-form-urlencoded");
+                request.onload = function() { // request successful
+                    // we can use server response to our request now
+                    console.log(request.responseText);
+                    document.getElementById("status").innerHTML = "New Wifi Info Submitted!"
+                };
+
+                request.onerror = function() {
+                    // request failed
+                };
+
+                request.send(formBody);
+                event.preventDefault();
+            }
+
+            document.getElementById("wifiform").addEventListener("submit", formSubmit);
+        </script>
     </body>
 </html>
