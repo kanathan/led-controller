@@ -11,8 +11,6 @@ use embedded_svc::{
 };
 use core::str;
 
-use std::collections::HashMap;
-
 use crate::wifi::WifiService;
 
 const LANDING_HTML: &str = include_str!("../data/landing.html");
@@ -21,6 +19,12 @@ const LANDING_HTML: &str = include_str!("../data/landing.html");
 pub struct ServerService {
     _esp_server: EspHttpServer,
     _wifi_svc: WifiService,
+}
+
+#[derive(serde::Deserialize)]
+struct WifiForm {
+    ssid: String,
+    password: String,
 }
 
 impl ServerService {
@@ -35,12 +39,12 @@ impl ServerService {
 
         let wifi_sender = wifi_svc.wifi_mode_tx.clone();
         esp_server.fn_handler("/wifi-data", Method::Post, move |mut request| {
-            let map =  parse_form_body(&mut request);
+            let data = get_request_data(&mut request);
 
-            if map.contains_key("ssid") && map.contains_key("password") {
+            if let Ok(wifi_form) = serde_urlencoded::from_bytes::<WifiForm>(&data) {
                 match wifi_sender.send(crate::wifi::WifiMode::Client(ClientConfiguration {
-                    ssid: map.get("ssid").unwrap().as_str().into(),
-                    password: map.get("password").unwrap().as_str().into(),
+                    ssid: wifi_form.ssid.as_str().into(),
+                    password: wifi_form.password.as_str().into(),
                     ..Default::default()
                 })) {
                     Ok(_) => request.into_ok_response()?,
@@ -62,42 +66,14 @@ impl ServerService {
 }
 
 
-fn parse_form_body(request: &mut Request<&mut EspHttpConnection>) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-
-    let full_string = read_into_string(request);
-    for item_str in full_string.split('&') {
-        if let Some((key, value)) = item_str.split_once('=') {
-            map.insert(key.to_string(), value.to_string());
-        }
-    }
-
-    map
-}
-
-
-fn read_into_string(request: &mut Request<&mut EspHttpConnection>) -> String {
+fn get_request_data(request: &mut Request<&mut EspHttpConnection>) -> Vec<u8> {
+    let mut output = Vec::new();
     let mut buffer: [u8; 256] = [0; 256];
-    let mut output = String::new();
-    let mut offset = 0;
 
     loop {
-        if let Ok(size) = request.read(&mut buffer[offset..]) {
+        if let Ok(size) = request.read(&mut buffer) {
             if size == 0 { break }
-            let size_plus_offset = size + offset;
-            match str::from_utf8(&buffer[..size_plus_offset]) {
-                Ok(text) => {
-                    output.push_str(text);
-                    offset = 0;
-                },
-                Err(error) => {
-                    let valid_up_to = error.valid_up_to();
-                    let text = str::from_utf8(&buffer[..valid_up_to]).unwrap();
-                    output.push_str(text);
-                    buffer.copy_within(valid_up_to.., 0);
-                    offset = size_plus_offset - valid_up_to;
-                }
-            }
+            output.extend_from_slice(&buffer[..size])
         }
     }
 
