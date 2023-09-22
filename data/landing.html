@@ -1,33 +1,123 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>LED Controller</title>
         <style>
-            html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}
-            body{margin-top: 50px;}
-            h1 {color: #444444;margin: 50px auto 30px;}
-            h3 {color: #444444;margin-bottom: 50px;}
-            .button {display: block;width: 80px;background-color: #3498db;border: none;color: white;padding: 13px 30px;text-decoration: none;font-size: 25px;margin: 0px auto 35px;cursor: pointer;border-radius: 4px;}
-            .button-on:active {background-color: #2980b9;}
-            .button-off {background-color: #34495e;}
-            .button-off:active {background-color: #2c3e50;}
-            .button-on {background-color: #3498db;}
-            p {font-size: 14px;color: #888;margin-bottom: 10px;}
+            html {
+            font-family: Arial, Helvetica, sans-serif;
+            display: inline-block;
+            text-align: center;
+            }
+            h1 {
+            color: white;
+            font-size: 1.8rem;
+            }
+            h3 {
+            font-size: 1rem;
+            }
+            .update {
+            font-size: 14px;
+            color: #888;
+            }
+            .topnav {
+            overflow: hidden;
+            background-color: #0A1128;
+            }
+            .content {
+            padding: 30px;
+            }
+            .card-grid {
+            max-width: 700px;
+            margin: 0 auto;
+            display: grid;
+            grid-gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            }
+            .card {
+            background-color: white;
+            box-shadow: 2px 2px 12px 1px rgba(140, 140, 140, 0.5);
+            }
+            .card-title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #034078
+            }
+            .button {
+              appearance: none;
+              background-color: #FAFBFC;
+              border: 1px solid rgba(27, 31, 35, 0.15);
+              border-radius: 6px;
+              box-shadow: rgba(27, 31, 35, 0.04) 0 1px 0, rgba(255, 255, 255, 0.25) 0 1px 0 inset;
+              box-sizing: border-box;
+              color: #24292E;
+              cursor: pointer;
+              display: inline-block;
+              font-family: -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+              font-size: 14px;
+              font-weight: 500;
+              line-height: 20px;
+              list-style: none;
+              padding: 6px 16px;
+              position: relative;
+              transition: background-color 0.2s cubic-bezier(0.3, 0, 0.5, 1);
+              user-select: none;
+              -webkit-user-select: none;
+              touch-action: manipulation;
+              vertical-align: middle;
+              white-space: nowrap;
+              word-wrap: break-word;
+            }
+            .button:hover {
+              background-color: #F3F4F6;
+              text-decoration: none;
+              transition-duration: 0.1s;
+            }
+            .button:disabled {
+              background-color: #FAFBFC;
+              border-color: rgba(27, 31, 35, 0.15);
+              color: #959DA5;
+              cursor: default;
+            }
+            .button:active {
+              background-color: #EDEFF2;
+              box-shadow: rgba(225, 228, 232, 0.2) 0 1px 0 inset;
+              transition: none 0s;
+            }
+            .button:focus {
+              outline: 1px transparent;
+            }
         </style>
     </head>
 
     <body>
-        <h1>ESP32 Web Server</h1>
-        <h3>Using {{wifi_mode}} Mode</h3>
-        <form id="wifiform" action="/wifi-data" method="POST">
-            <label for="ssid">SSID:</label><br>
-            <input type="text" id="ssid" name="ssid"><br><br>
-            <label for="password">Password:</label><br>
-            <input type="password" id="password" name="password"><br><br>
-            <button id="main-submit" type="submit">Connect</button>
-        </form>
-        <p id="status"></p>
+        <div class="topnav">
+            <h1>LED Controller</h1>
+        </div>
+        <div class="content">
+            <div class="card-grid">
+                <div class="card">
+                    <p class="card-title">Wifi</p>
+                    <h3>Using {{wifi_mode}} Mode</h3>
+                    <form id="wifiform" action="/wifi-data" method="POST">
+                        <label for="ssid">SSID:</label><br>
+                        <input type="text" id="ssid" name="ssid"><br><br>
+                        <label for="password">Password:</label><br>
+                        <input type="password" id="password" name="password"><br><br>
+                        <button id="main-submit" type="submit">Connect</button>
+                    </form>
+                    <p class="update" id="status"></p>
+                </div>
+                <div class="card">
+                    <p class="card-title">OTA</p>
+                    <h3>Firmware Info TBD Here</h3>
+                    <div class="button" id="ota-button" onclick="file_sel.click();">Upload Firmware</div><br><br>
+                    <input type="file" id="file_sel" onchange="upload_file()" style="display: none;">
+                    <progress id="file-progress" max="100" value="0" style="display: none;"></progress>
+                    <p class="update" id="ota_status"></p>
+                </div>
+            </div>
+            </div>
         <script>
             function formSubmit(event) {
                 var url = "/wifi-data";
@@ -57,6 +147,33 @@
             }
 
             document.getElementById("wifiform").addEventListener("submit", formSubmit);
+
+            function upload_file() {
+                document.getElementById("ota_status").innerHTML = "Upload in progress";
+                document.getElementById("file-progress").style.display = "initial"
+                document.getElementById("ota-button").disabled = true;
+                let data = document.getElementById("file_sel").files[0];
+                xhr = new XMLHttpRequest();
+                xhr.open("POST", "/ota-update", true);
+                xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+                xhr.upload.addEventListener("progress", function (event) {
+                    if (event.lengthComputable) {
+                        document.getElementById("file-progress").value = (event.loaded / event.total) * 100;
+                    }
+                });
+                xhr.onreadystatechange = function () {
+                    if(xhr.readyState === XMLHttpRequest.DONE) {
+                        var status = xhr.status;
+                        if (status >= 200 && status < 400) {
+                            document.getElementById("ota_status").innerHTML = "Upload accepted. Device will reboot.";
+                        } else {
+                            document.getElementById("ota_status").innerHTML = "Upload rejected!";
+                        }
+                    }
+                };
+                xhr.send(data);
+                return false;
+            }
         </script>
     </body>
 </html>

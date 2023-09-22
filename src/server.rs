@@ -12,6 +12,7 @@ use core::str;
 use std::collections::HashMap;
 
 use crate::wifi::{WifiService, WifiMode};
+use crate::ota;
 
 
 const LANDING_HTML: &str = include_str!("../data/landing.html");
@@ -33,16 +34,20 @@ impl ServerService {
     pub fn init_server(wifi_svc: WifiService) -> Result<Self> {
         let mut esp_server = EspHttpServer::new(&Configuration::default())?;
 
+
+
         let wifi_status = wifi_svc.current_mode().clone();
         esp_server.fn_handler("/", Method::Get, move |request| {
             match wifi_status.lock() {
                 Ok(status) => {
                     let mut template_data = HashMap::new();
                     let mut response = request.into_ok_response()?;
+
                     match *status {
                         WifiMode::AP => template_data.insert("wifi_mode", "Access Point(AP)"),
                         WifiMode::Client(_) => template_data.insert("wifi_mode", "Client"),
                     };
+
                     response.write(replace_template(LANDING_HTML, &template_data).as_bytes())?
                 },
                 Err(_) => {
@@ -54,11 +59,13 @@ impl ServerService {
         })?;
 
 
+
         esp_server.fn_handler("/favicon.ico", Method::Get, |request| {
             let mut response = request.into_ok_response()?;
             response.write(FAVICON)?;
             Ok(())
         })?;
+
 
 
         let wifi_sender = wifi_svc.wifi_mode_tx.clone();
@@ -77,6 +84,32 @@ impl ServerService {
 
             Ok(())
         })?;
+
+
+
+        esp_server.fn_handler("/ota-update", Method::Post, |mut request| {
+            if request.header("X-Requested-With").is_none() {
+                log::warn!("ota-update POST without X-Requested-With header");
+                request.into_status_response(406)?;
+                return Ok(())
+            }
+            if request.header("X-Requested-With").unwrap() != "XMLHttpRequest" {
+                log::warn!("ota-update POST with incorrect X-Requested-With header data: {}", request.header("X-Requested-With").unwrap());
+                request.into_status_response(406)?;
+                return Ok(())
+            }
+
+            match ota::ota_update(&mut request) {
+                Ok(_) => request.into_ok_response()?,
+                Err(e) => {
+                    request.into_response(515, Some(&e.to_string()), &[])?
+                }
+            };
+
+            Ok(())
+        })?;
+
+
 
         Ok(Self {
             _esp_server: esp_server,
