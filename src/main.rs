@@ -4,6 +4,7 @@ use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     nvs::EspDefaultNvsPartition,
 };
+
 use std:: {
     thread,
     time::Duration,
@@ -22,6 +23,9 @@ fn main() -> Result<()> {
     esp_idf_sys::link_patches();
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
+
+    // Macro to update app version info
+    esp_idf_sys::esp_app_desc!();
 
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take()?;

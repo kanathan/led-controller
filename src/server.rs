@@ -1,8 +1,11 @@
 use anyhow::Result;
-use esp_idf_svc::http::server::{
-    EspHttpServer,
-    Configuration,
-    EspHttpConnection,
+use esp_idf_svc::{
+    http::server::{
+        EspHttpServer,
+        Configuration,
+        EspHttpConnection,
+    },
+    ota::EspOta,
 };
 use embedded_svc::{
     http::Method,
@@ -10,10 +13,14 @@ use embedded_svc::{
 };
 use core::str;
 use std::collections::HashMap;
+use std::thread;
+use std::time::Duration;
 
 use crate::wifi::{WifiService, WifiMode};
 use crate::ota;
 
+
+pub const GIT_HASH: &str = env!("GIT_HASH");
 
 const LANDING_HTML: &str = include_str!("../data/landing.html");
 const FAVICON: &[u8] = include_bytes!("../data/led.ico");
@@ -38,14 +45,34 @@ impl ServerService {
 
         let wifi_status = wifi_svc.current_mode().clone();
         esp_server.fn_handler("/", Method::Get, move |request| {
+            let mut template_data: HashMap<&str, String> = HashMap::new();
+
+            
+
+            if let Ok(esp_ota) = EspOta::new() {
+                if let Ok(slot) = esp_ota.get_running_slot() {
+                    template_data.insert("partition", slot.label.to_string());
+                    if let Some(firmware) = slot.firmware {
+                        template_data.insert("version", firmware.version.to_string());
+                        template_data.insert("time-uploaded", firmware.released.to_string());
+                    }
+                }
+            }
+
+            template_data.entry("partition").or_default();
+            template_data.entry("version").or_default();
+            template_data.entry("time-uploaded").or_default();
+            template_data.insert("app-hash", GIT_HASH.into());
+
+
             match wifi_status.lock() {
                 Ok(status) => {
-                    let mut template_data = HashMap::new();
+                    
                     let mut response = request.into_ok_response()?;
 
                     match *status {
-                        WifiMode::AP => template_data.insert("wifi_mode", "Access Point(AP)"),
-                        WifiMode::Client(_) => template_data.insert("wifi_mode", "Client"),
+                        WifiMode::AP => template_data.insert("wifi_mode", "Access Point(AP)".to_string()),
+                        WifiMode::Client(_) => template_data.insert("wifi_mode", "Client".to_string()),
                     };
 
                     response.write(replace_template(LANDING_HTML, &template_data).as_bytes())?
@@ -106,6 +133,11 @@ impl ServerService {
                 }
             };
 
+            thread::spawn(|| {
+                thread::sleep(Duration::from_secs(5));
+                esp_idf_hal::reset::restart();
+            });
+
             Ok(())
         })?;
 
@@ -135,7 +167,7 @@ fn get_request_data(request: &mut Request<&mut EspHttpConnection>) -> Vec<u8> {
 }
 
 
-fn replace_template(source: &str, data: &HashMap<&str,&str>) -> String {
+fn replace_template(source: &str, data: &HashMap<&str,String>) -> String {
     let mut output = source.to_string();
 
     for (key, val) in data.iter() {
