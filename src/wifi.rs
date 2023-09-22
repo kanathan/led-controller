@@ -39,6 +39,16 @@ pub enum WifiMode {
     Client(ClientConfiguration),
 }
 
+impl WifiMode {
+    pub fn client(ssid: &str, password: &str) -> Self {
+        WifiMode::Client(ClientConfiguration {
+            ssid: ssid.into(),
+            password: password.into(),
+            ..Default::default()
+        })
+    }
+}
+
 pub struct WifiService {
     _handle: thread::JoinHandle<()>,
     pub wifi_mode_tx: mpsc::Sender<WifiMode>,
@@ -93,15 +103,6 @@ impl WifiService {
 
     pub fn current_mode(&self) -> &Arc<Mutex<WifiMode>> {
         &self.cur_mode
-    }
-
-    pub fn connect_to_client(&self, ssid: &str, password: &str) -> Result<()> {
-        self.wifi_mode_tx.send(WifiMode::Client(ClientConfiguration {
-            ssid: ssid.into(),
-            password: password.into(),
-            ..Default::default()
-        }))?;
-        Ok(())
     }
 }
 

@@ -7,7 +7,6 @@ use esp_idf_svc::http::server::{
 use embedded_svc::{
     http::Method,
     http::server::Request,
-    wifi::ClientConfiguration,
 };
 use core::str;
 use std::collections::HashMap;
@@ -67,11 +66,8 @@ impl ServerService {
             let data = get_request_data(&mut request);
 
             if let Ok(wifi_form) = serde_urlencoded::from_bytes::<WifiForm>(&data) {
-                match wifi_sender.send(crate::wifi::WifiMode::Client(ClientConfiguration {
-                    ssid: wifi_form.ssid.as_str().into(),
-                    password: wifi_form.password.as_str().into(),
-                    ..Default::default()
-                })) {
+                match wifi_sender.send(crate::wifi::WifiMode::client(&wifi_form.ssid, &wifi_form.password))
+                {
                     Ok(_) => request.into_ok_response()?,
                     Err(_) => request.into_response(500, Some("Unable to send response"), &[])?
                 };
