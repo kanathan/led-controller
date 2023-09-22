@@ -10,10 +10,13 @@ use embedded_svc::{
     wifi::ClientConfiguration,
 };
 use core::str;
+use std::collections::HashMap;
 
-use crate::wifi::WifiService;
+use crate::wifi::{WifiService, WifiMode};
+
 
 const LANDING_HTML: &str = include_str!("../data/landing.html");
+const FAVICON: &[u8] = include_bytes!("../data/led.ico");
 
 
 pub struct ServerService {
@@ -31,11 +34,33 @@ impl ServerService {
     pub fn init_server(wifi_svc: WifiService) -> Result<Self> {
         let mut esp_server = EspHttpServer::new(&Configuration::default())?;
 
-        esp_server.fn_handler("/", Method::Get, |request| {
-            let mut response = request.into_ok_response()?;
-            response.write(LANDING_HTML.as_bytes())?;
+        let wifi_status = wifi_svc.current_mode().clone();
+        esp_server.fn_handler("/", Method::Get, move |request| {
+            match wifi_status.lock() {
+                Ok(status) => {
+                    let mut template_data = HashMap::new();
+                    let mut response = request.into_ok_response()?;
+                    match *status {
+                        WifiMode::AP => template_data.insert("wifi_mode", "Access Point(AP)"),
+                        WifiMode::Client(_) => template_data.insert("wifi_mode", "Client"),
+                    };
+                    response.write(replace_template(LANDING_HTML, &template_data).as_bytes())?
+                },
+                Err(_) => {
+                    request.into_response(500, Some("Unable to get wifi status"), &[])?;
+                    return Ok(())
+                }
+            };
             Ok(())
         })?;
+
+
+        esp_server.fn_handler("/favicon.ico", Method::Get, |request| {
+            let mut response = request.into_ok_response()?;
+            response.write(FAVICON)?;
+            Ok(())
+        })?;
+
 
         let wifi_sender = wifi_svc.wifi_mode_tx.clone();
         esp_server.fn_handler("/wifi-data", Method::Post, move |mut request| {
@@ -75,6 +100,18 @@ fn get_request_data(request: &mut Request<&mut EspHttpConnection>) -> Vec<u8> {
             if size == 0 { break }
             output.extend_from_slice(&buffer[..size])
         }
+    }
+
+    output
+}
+
+
+fn replace_template(source: &str, data: &HashMap<&str,&str>) -> String {
+    let mut output = source.to_string();
+
+    for (key, val) in data.iter() {
+        let fullkey = format!("{{{{{key}}}}}");
+        output = output.replace(&fullkey, val)
     }
 
     output
