@@ -3,4 +3,7 @@ mod controller;
 mod led;
 mod segment;
 
-pub use controller::LEDController;
+pub use controller::LEDControllerService;
+pub use segment::Segment;
+pub use led::Led;
+pub use color::Color;

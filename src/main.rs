@@ -13,6 +13,7 @@ use std:: {
 // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
 use esp_idf_sys as _;
 
+mod effects;
 mod led_control;
 mod ota;
 mod server;
@@ -36,10 +37,12 @@ fn main() -> Result<()> {
 
     let _server = server::ServerService::init_server(wifi_svc)?;
 
-    let mut led_ctrl = led_control::LEDController::new(peripherals.rmt.channel0, peripherals.pins.gpio15)?;
+    let _led_ctrl = led_control::LEDControllerService::init(
+        peripherals.rmt.channel0,
+        peripherals.pins.gpio15
+    )?;
 
     loop {
-        thread::sleep(Duration::from_millis(100));
-        led_ctrl.tick()?;
+        thread::sleep(Duration::from_secs(1000));
     }
 }

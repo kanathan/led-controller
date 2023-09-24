@@ -8,7 +8,7 @@ pub struct Segment {
 impl Segment {
     pub fn new(led_count: usize) -> Self {
         Self {
-            leds: vec![Led::new(); led_count]
+            leds: vec![Led::new(); led_count+1] // BUG: Adding +1 to avoid last led from flickering
         }
     }
 

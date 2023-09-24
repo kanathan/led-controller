@@ -37,6 +37,7 @@ anyhow = "1.0.75"
 futures = "0.3"
 serde_urlencoded = "0.7"
 serde = "1.0.188"
+rand = "0.8.5"
 
 [build-dependencies]
 embuild = "0.31.2"
