@@ -1,6 +1,4 @@
-use crate::effects::Blink;
-use crate::effects::Effect;
-use crate::effects::Rainbow;
+use crate::effects::*;
 use super::segment::Segment;
 use super::color::Color;
 
@@ -17,12 +15,10 @@ use esp_idf_hal::{
     peripheral,
     gpio::OutputPin,
     task::thread::ThreadSpawnConfiguration,
+    cpu::Core,
 };
 
-use std::time:: {
-    Duration,
-    Instant,
-};
+use std::time::Duration;
 use std::sync::OnceLock;
 use std::thread;
 
@@ -60,6 +56,7 @@ impl LEDControllerService {
         ThreadSpawnConfiguration {
             name: Some(b"Led_Controller\0"),
             priority: 10,
+            pin_to_core: Some(Core::Core0),
             ..Default::default()
         }.set().unwrap();
 
@@ -93,7 +90,7 @@ impl<'a> LEDController<'a> {
     ) -> Result<Self> {
         let config = TransmitConfig {
             clock_divider: CLOCK_DIV,
-            mem_block_num: 1,
+            mem_block_num: 8,
             carrier: None,
             looping: Loop::None,
             idle: Some(PinState::Low),
@@ -127,7 +124,7 @@ impl<'a> LEDController<'a> {
         }
 
         //let effect = Box::new(Rainbow::init(0, 10));
-        let effect = Box::new(crate::effects::SpookyEyes::init(2, 50));
+        let effect = Box::new(crate::effects::SpookyEyes::init(10, 50));
 
         Ok(Self {
             segment: Segment::new(50),
@@ -165,7 +162,7 @@ impl<'a> LEDController<'a> {
 
         signal.push(PULSE_RESET.get().unwrap())?;
 
-        self.rmt_tx.start(signal)?;
+        self.rmt_tx.start_blocking(&signal)?;
 
         Ok(())
     }
@@ -174,7 +171,7 @@ impl<'a> LEDController<'a> {
 
 fn write_color(signal: &mut VariableLengthSignal, color: Color) -> Result<()> {
     // For WS2811 sent as RGB with the MSB first
-    for val in [color.r, color.b, color.g] {
+    for val in [color.r, color.g, color.b] {
         for shift in (0..8).rev() {
             if val & (1 << shift) == 0 {
                 signal.push(PULSES_LOW.get().ok_or(Error::msg("PULSES_LOW not set"))?)?;

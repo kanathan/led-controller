@@ -7,12 +7,13 @@ pub struct Color {
 }
 
 impl Color {
-    pub fn rgb(r: u8, b: u8, g: u8) -> Self {
+    pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self {
             r, g, b
         }
     }
 
+    /*
     pub fn hsv(h: u8, s: u8, v: u8) -> Self {
         // https://en.wikipedia.org/wiki/HSL_and_HSV
         let h_deg = (h as f32) / 255.0 * 360.0;
@@ -43,13 +44,10 @@ impl Color {
             b: ((b1 + m) * 255.0) as u8,
         }
     }
+    */
 
     pub fn black() -> Self {
         Self::rgb(0, 0, 0)
-    }
-
-    pub fn white() -> Self {
-        Self::rgb(255, 255, 255)
     }
 }
 

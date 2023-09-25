@@ -12,12 +12,14 @@ impl Segment {
         }
     }
 
+    #[allow(dead_code)]
     pub fn turn_off(&mut self) {
         for led in self.leds.iter_mut() {
             led.turn_off();
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_all(&mut self, color: Color) {
         for led in self.leds.iter_mut() {
             led.set(color);

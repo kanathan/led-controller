@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::Effect;
 use crate::led_control::Color;
 

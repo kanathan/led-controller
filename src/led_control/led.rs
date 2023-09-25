@@ -12,6 +12,7 @@ impl Led {
         }
     }
 
+    #[allow(dead_code)]
     pub fn turn_off(&mut self) {
         self.color = Color::black();
     }
