@@ -1,6 +1,6 @@
 [package]
 name = "led-controller"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["Nathan Federknopp <nknopp@gmail.com>"]
 edition = "2021"
 resolver = "2"
@@ -38,6 +38,7 @@ futures = "0.3"
 serde_urlencoded = "0.7"
 serde = "1.0.188"
 rand = "0.8.5"
+lazy_static = "1.4.0"
 
 [build-dependencies]
 embuild = "0.31.2"

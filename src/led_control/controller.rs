@@ -1,6 +1,7 @@
 use crate::effects::*;
 use super::segment::Segment;
 use super::color::Color;
+use super::LED_COUNT;
 
 use anyhow::{Result, Error};
 use esp_idf_hal::{
@@ -124,10 +125,10 @@ impl<'a> LEDController<'a> {
         }
 
         //let effect = Box::new(Rainbow::init(0, 10));
-        let effect = Box::new(crate::effects::SpookyEyes::init(10, 50));
+        let effect = Box::new(crate::effects::SpookyEyes::init(LED_COUNT));
 
         Ok(Self {
-            segment: Segment::new(50),
+            segment: Segment::new(LED_COUNT),
             rmt_tx,
             effect,
         })

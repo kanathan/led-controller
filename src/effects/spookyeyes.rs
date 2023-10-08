@@ -3,6 +3,7 @@ use crate::led_control::Color;
 use crate::led_control::Segment;
 
 use rand::prelude::*;
+use rand::distributions::WeightedIndex;
 use std::time::{Duration, Instant};
 
 pub struct SpookyEyes {
@@ -12,51 +13,34 @@ pub struct SpookyEyes {
 
 const COLOR_CORRECTION: (u8, u8, u8) = (255, 224, 140);
 
+const INIT_ON_TIME: Duration = Duration::from_secs(15);
 const FADETIME: Duration = Duration::from_secs(2);
-const BLINKTIME: Duration = Duration::from_millis(500);
+const BLINKTIME_MS_MIN:  u64 = 200;
+const BLINKTIME_MS_MAX: u64 = 500;
 
-const COLORS: [Color; 2] = [
-    Color::rgb(153, 0, 0), // Red
-    //Color::rgb(255, 128, 0), // Orange
-    //Color::rgb(204, 204, 0), // Yellow
-    Color::rgb(102, 204, 0), // Green
+
+const COLOR_WEIGHTS: [(Color, u32); 3] = [
+    (Color::rgb(153, 0, 0), 80),    // Red, 80%
+    (Color::rgb(178, 115, 0), 15),  // Orange, 15%
+    (Color::rgb(51, 102, 0), 5),   // Green, 5%
 ];
+
+lazy_static::lazy_static! {
+    static ref COLOR_DIST: WeightedIndex<u32> = WeightedIndex::new(COLOR_WEIGHTS.iter().map(|item| item.1)).unwrap();
+}
 
 
 impl SpookyEyes {
-    pub fn init(n_eyes: usize, segment_length: usize) -> Self {
+    pub fn init(segment_length: usize) -> Self {
         let mut eye_pairs = vec![];
 
-        if segment_length < 2 {
-            log::error!("Need segment length > 1 for spooky eyes to work");
-            return Self {
-                eye_pairs,
-                last_update: Instant::now()
-            }
-        }        
 
-        #[allow(clippy::single_range_in_vec_init)]
-        let mut free_space = vec![(0..segment_length-1)];
-
-        for _ in 0..n_eyes {
-            if free_space.is_empty() { break }
-
-            let rng_idx = thread_rng().gen_range(0..free_space.len());
-            let in_range = free_space.swap_remove(rng_idx);
-            let min = in_range.start;
-            let max = in_range.end - 1;
-
-            let x1 = thread_rng().gen_range(in_range);
-            let x2 = x1 + 1;
-
-            if x1 > min + 2 {
-                free_space.push(min..(x1-2));
-            }
-            if x2 + 2 <= max {
-                free_space.push(x2+2..(max+1));
-            }
-
-            eye_pairs.push(EyePair::new((x1, x2)));
+        let mut idx = 0;
+        let mut color_idx = 0;
+        while (idx + 1) < segment_length {
+            eye_pairs.push(EyePair::new((idx, idx+1)));
+            idx += 8; // Good spread with current setup in tree
+            color_idx = (color_idx + 1) % COLOR_WEIGHTS.len();
         }
 
         Self {
@@ -88,8 +72,12 @@ struct EyePair {
 
 impl EyePair {
     fn new(indices: (usize, usize)) -> Self {
-        let color = COLORS[thread_rng().gen_range(0..COLORS.len())];
+        let color = COLOR_WEIGHTS[COLOR_DIST.sample(&mut thread_rng())].0;
 
+        Self::new_with_color(indices, color)
+    }
+
+    fn new_with_color(indices: (usize, usize), color: Color) -> Self {
         let color = Color::rgb(
             (color.r as f32 * (COLOR_CORRECTION.0 as f32) / 255.0).round() as u8,
             (color.g as f32 * (COLOR_CORRECTION.1 as f32) / 255.0).round() as u8,
@@ -97,7 +85,7 @@ impl EyePair {
 
         Self {
             indices,
-            state: EyeState::set_closed(),
+            state: EyeState::set_opened_for(INIT_ON_TIME),
             color,
         }
     }
@@ -109,6 +97,7 @@ impl EyePair {
             EyeState::Closed(remaining) => {
                 *remaining = remaining.saturating_sub(duration);
                 if remaining.is_zero() {
+                    self.color = COLOR_WEIGHTS[COLOR_DIST.sample(&mut thread_rng())].0;
                     self.state = EyeState::set_opening();
                 }
                 new_color = Color::black();
@@ -119,7 +108,8 @@ impl EyePair {
                 if remaining_on.is_zero() {
                     self.state = EyeState::set_closing();
                 } else if remaining_blink.is_zero() {
-                    self.state = EyeState::Blinking(*remaining_on, BLINKTIME);
+                    let blink_time = rand::thread_rng().gen_range(BLINKTIME_MS_MIN..=BLINKTIME_MS_MAX);
+                    self.state = EyeState::Blinking(*remaining_on, Duration::from_millis(blink_time));
                 }
                 new_color = self.color;
             },
@@ -177,9 +167,14 @@ impl EyeState {
     }
 
     fn set_opened() -> Self {
-        let secs_on = thread_rng().gen_range(120..=180);
+        let secs_on = thread_rng().gen_range(120..=300);
         let secs_blink = thread_rng().gen_range(2..=30);
         EyeState::Opened(Duration::from_secs(secs_on), Duration::from_secs(secs_blink))
+    }
+
+    fn set_opened_for(on_duration: Duration) -> Self {
+        let secs_blink = thread_rng().gen_range(2..=30);
+        EyeState::Opened(on_duration, Duration::from_secs(secs_blink))
     }
 
     fn set_opening() -> Self {
